@@ -1,0 +1,296 @@
+<html>
+<head>
+	<title>Handlebar Model</title>
+	<style>*{margin:0;padding:0;} title{color:grey}</style>
+	<script src="dat.gui.min.js"></script>
+	<script src="three.min.js"></script>
+	<script src="TrackballControls.js"></script>
+	<script src="AxisHelper.js"></script>
+	<script src="TorusGeometry.js"></script>
+</head>
+<body>
+
+<table id="angles">
+<tr> <td>Angle</td> <td>Cosine</td> <td>Sine</td> <td>rads</td> <td>len</td> </tr>
+<tr> <td>External points (x,y,z)</td> <td></td> <td></td> <td></td> <td></td> </tr>
+<tr> <td>Rise Angle</td><td></td><td></td><td></td> </tr>
+<tr> <td>Handle Angle</td><td></td><td></td><td></td> </tr>
+<tr> <td>Pullback Angle</td><td></td><td></td><td></td> </tr>
+<tr> <td>Handlebar</td><td></td><td></td><td></td> </tr>
+</table>
+
+</body>
+<script>
+
+
+    var camera, scene, renderer, workingArea, rollSphere, stepOne, stepTwo;
+	var width = window.innerWidth - 400;
+	var height = window.innerHeight - 100;
+	
+	var material = new THREE.MeshPhongMaterial( { ambient: 0x030303, color: 0xdddddd, specular: 0x009900, shininess: 30, shading: THREE.SmoothShading } );
+	var thickness = 6;
+	var radii = new Array();
+	var radiiCenters = new Array();
+	var sphereGeometry = new THREE.SphereGeometry( thickness, 16, 16);
+	
+	var midx = midy = midz = extx = exty = extz = ray = pullbackAngle = 0;
+	
+	var Parameters = {	
+		centerWidth : 200,
+		riseRadius : 2.00,
+		riseAngle : Math.PI/2,
+		riseLength : 100,
+		handleAngle : Math.PI/2,
+		handleRadius : 2.00,
+		pullbackAngle : 0.1,
+		pullbackLength : 100,
+		handlebarRotation : Math.PI/2
+	};
+		
+	var angles = updateAngleCoordinates();
+	
+	
+	
+	window.onload = function() {
+		var gui = new dat.GUI();
+		gui.width = 350;
+		var f1 = gui.addFolder('General');
+		var f2 = gui.addFolder('Rise');
+		var f3 = gui.addFolder('Handle & Pullback');
+		
+		f1.add(Parameters, 'centerWidth'	, 50, 200).name("Center Width").onChange( updateScene );
+		f1.add(Parameters, 'handlebarRotation', Math.PI/2,Math.PI).name("Handlebar Rotation").onChange( updateScene );
+		f1.open();
+		
+		f2.add(Parameters, 'riseRadius'		, 0, 3.75).name("Rise Radius (NW)");
+		f2.add(Parameters, 'riseAngle'		, Math.PI/2, 3/4*Math.PI ).name("Rise Angle").onChange( updateScene ); // to repair
+		f2.add(Parameters, 'riseLength'		, 50, 200).name("Rise Length").onChange( updateScene );
+		f2.open();
+		
+		f3.add(Parameters, 'handleAngle'	, Math.PI/4, 3/4*Math.PI).name("Handle Angle").onChange( updateScene );
+		f3.add(Parameters, 'handleRadius'	, 0, 3.75).name("Handle Radius (NW)");
+		f3.add(Parameters, 'pullbackAngle'	, 0.1, 1.22).name("Pullback Angle").onChange( updateScene ); // to repair
+		f3.add(Parameters, 'pullbackLength'	, 0, 150).name("Pullback Length").onChange( updateScene );
+		f3.open();
+	
+	};	
+	
+	init();
+	initHandlebar();
+	generateRadii();
+    animate();
+	
+	function updateScene(){
+		angles = updateAngleCoordinates();
+		reloadHandlebar();
+		updateAngleTable();
+	}
+	
+	function generateRadii(){
+		var torusGeometry = new THREE.TorusGeometry(40, thickness, 16, 32, -Math.PI/2);
+		var c = 4;
+		var t;
+		radiiCenters = [
+		(Parameters.centerWidth/2)-torusGeometry.radius,0+torusGeometry.radius,0, // right up
+		0,0,0, // right down
+		0,0,0, // left down
+		0,0,0, // left up		
+		];
+		// bottom-up creation
+		while(c--){
+			t = new THREE.Mesh( torusGeometry, material );
+			console.log(torusGeometry);
+			t.position.set(radiiCenters[0+3*c], radiiCenters[1+3*c],radiiCenters[2+3*c]);
+			console.log(radiiCenters[0+3*c], radiiCenters[1+3*c],radiiCenters[2+3*c]);
+			radii.push(t);
+			console.log(c, radii);
+		}	
+	}
+	
+	
+	function updateAngleCoordinates()
+	{
+		midx = (Parameters.centerWidth/2) + Parameters.riseLength*Math.cos(Math.PI-Parameters.riseAngle);
+		midy = Parameters.riseLength*Math.sin(Parameters.riseAngle)*Math.sin(Parameters.handlebarRotation);
+		midz = Parameters.riseLength*Math.cos(Math.PI+Parameters.handlebarRotation);
+		pullbackAngle = Parameters.pullbackAngle - 0.1;
+		
+		extx = 
+			midx
+			+ Parameters.pullbackLength*Math.sin(Math.PI/2+Parameters.riseAngle-Parameters.handleAngle) // handle angle	
+			- Parameters.pullbackLength*Math.sin(Math.PI-Parameters.riseAngle)*Math.sin(pullbackAngle)*Math.cos(Parameters.handlebarRotation) // pullback (0 when 2d) 
+			
+		exty = 
+			midy
+			- Parameters.pullbackLength*Math.cos(Parameters.handleAngle)*Math.cos(Math.PI/2-Parameters.riseAngle)*Math.sin(Parameters.handlebarRotation) // handle angle	
+			- Parameters.pullbackLength*Math.cos(Math.PI-Parameters.riseAngle)*Math.sin(Parameters.handlebarRotation)
+			- Parameters.pullbackLength*Math.sin(pullbackAngle)*Math.sin(Parameters.handlebarRotation-Math.PI/2); // (0 when 2d) pullback angle and z axis
+		extz = 
+			(Parameters.riseLength + Parameters.pullbackLength*Math.sin(Parameters.handleAngle-Math.PI/2))*Math.cos(Parameters.handlebarRotation) 
+			- Parameters.pullbackLength*Math.sin(pullbackAngle)*Math.sin(Parameters.handlebarRotation)// pullback and z axis
+			- Parameters.pullbackLength*Math.cos(Math.PI-Parameters.riseAngle)*Math.cos(Parameters.handlebarRotation);
+		
+		return [
+		
+		/* extreme right point */
+		extx, exty, extz, 
+		
+		/* medium right point */
+		midx, midy, -midz, 
+		
+		/* base points */	
+		(Parameters.centerWidth/2),0,0, 	
+		-(Parameters.centerWidth/2),0,0,
+		
+		/* medium left point */
+		-midx, midy, -midz, 
+		-extx, exty, extz
+		];	
+	}
+	var tabroot;
+	function updateAngleTable()
+	{
+		tabroot = document.getElementById('angles').firstElementChild;
+		tabroot.children[1].children[1].innerText = extx.toString();
+		tabroot.children[1].children[2].innerText = exty.toString();
+		tabroot.children[1].children[3].innerText = extz.toString();
+		tabroot.children[1].children[4].innerText = (Math.sqrt(((extx - midx)*(extx - midx))+((exty - midy)*(exty - midy)))).toString();
+		tabroot.children[2].children[1].innerText = Math.cos(Parameters.riseAngle).toString();
+		tabroot.children[2].children[2].innerText = Math.sin(Parameters.riseAngle).toString();
+		tabroot.children[3].children[1].innerText = Math.cos(Parameters.handleAngle).toString();
+		tabroot.children[3].children[2].innerText = Math.sin(Parameters.handleAngle).toString();
+		tabroot.children[4].children[1].innerText = Math.cos(Parameters.pullbackAngle).toString();
+		tabroot.children[4].children[2].innerText = Math.sin(Parameters.pullbackAngle).toString();
+		tabroot.children[5].children[1].innerText = Math.cos(Parameters.handlebarRotation).toString();
+		tabroot.children[5].children[2].innerText = Math.sin(Parameters.handlebarRotation).toString();
+	}
+	
+	function initHandlebar()
+	{
+		scene.add( extractLight( 1 ) );
+		scene.add( extractLight( 2 ) );	
+		scene.add( new THREE.AxisHelper( 150 ) );
+		loadBarParts();		
+		loadRadii();	
+	}
+	
+	function reloadHandlebar()
+	{
+		var i = scene.children.length;
+		while (i--) {
+			if(scene.children[i] instanceof THREE.Mesh)
+			{
+				scene.remove(scene.children[i]);
+			}
+		}
+		loadBarParts();		
+		loadRadii();		
+	}
+	
+	function loadBarParts() 
+	{		
+		for( var i = 0; i<angles.length; i+=3)
+		{
+			if( angles[i+3] !== undefined )
+			{
+				scene.add( drawBar( new Array( angles[i], angles[i+1], angles[i+2], angles[i+3], angles[i+4], angles[i+5] ) ) );
+			}
+			scene.add( angSphere( angles[i], angles[i+1], angles[i+2] ) );
+		}		
+	}
+	
+	function loadRadii() 
+	{		
+		var i = radii.length;
+		while (i--) {
+			scene.add(radii[i]);
+		}	
+	}
+	
+	
+	function angSphere(x,y,z)
+	{
+		rollSphere = new THREE.Mesh( sphereGeometry, material );
+		rollSphere.position.set( x,y,z );		
+		return rollSphere;
+	}
+
+	function init() {
+        camera = new THREE.PerspectiveCamera( 45, width / height, 1, 5000 );
+		camera.position.set( 0, 0, 700 ); 			
+        scene = new THREE.Scene();		
+		workingArea = createRenderer();
+        document.body.insertBefore( workingArea, document.body.firstChild );
+		controller = new THREE.TrackballControls( camera, workingArea );	
+    }
+	
+	function createRenderer()
+	{
+		renderer = new THREE.WebGLRenderer();
+		renderer.setSize( width, height);
+		renderer.setClearColorHex(0xCCCCCC, 1);
+		return renderer.domElement;
+	}
+	
+    function animate() 
+	{		
+        requestAnimationFrame( animate );		
+		controller.update();
+        renderer.render( scene, camera );
+    }
+	
+	function extractLight( num )
+	{
+		if( num === 1 )
+		{		
+			var directionalLight = new THREE.DirectionalLight( 0xffffff );
+			directionalLight.position.set( 0.5, 0.5, 0.5 );
+			return directionalLight;
+		}
+		else if( num === 2 )
+		{			
+			var directionalLight = new THREE.DirectionalLight( 0xffffff );
+			directionalLight.position.set( -0.5, -0.5, -0.5 );
+			return directionalLight;
+		}
+	}	
+		
+	function drawBar( pts )
+	{
+		return new THREE.Mesh( 
+			new THREE.ExtrudeGeometry( 
+				circleShape(64), 
+				{ extrudePath: returnPathExtrema( pts ) } 
+			), 
+			material 
+		);		
+	}
+	/**
+	 * Takes in input 6 points and returns a "straight curve" between
+	 * A(0,1,2) and B(3,4,5)
+	 */
+	function returnPathExtrema( pts )
+	{
+		return new THREE.SplineCurve3( [
+			new THREE.Vector3( pts[0], pts[1], pts[2] ), // A(x,y,z)
+			new THREE.Vector3( pts[3], pts[4], pts[5] )  // B(x,y,z)
+		]);
+	}
+	/**
+	 * Returns a circular shape
+	 */	
+	function circleShape(numPoints)
+	{
+		var pts = [];
+		for ( j = 0; j < numPoints; j ++ ) {
+			var a = 2*Math.PI * j / numPoints;
+			pts.push( new THREE.Vector2 ( Math.cos( a ) * thickness, Math.sin( a ) * thickness ) );
+		}		
+		var shape = new THREE.Shape( pts );	
+		return shape;
+	}	
+	
+	
+
+</script>
+</html>
